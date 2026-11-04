@@ -6,6 +6,8 @@
 defineProps<{
   title: string;
   description?: string;
+  /** 色块图例：在标题前画一小段该颜色的线（图表配色类设置项用，如分时图辅助线） */
+  swatch?: string;
   /** 只读/不可用项：降低对比度并禁用指针交互，与「可点但没反应」区分开。 */
   disabled?: boolean;
 }>();
@@ -14,7 +16,10 @@ defineProps<{
 <template>
   <div class="settings-row" :class="{ disabled }">
     <div class="row-label">
-      <div class="row-title">{{ title }}</div>
+      <div class="row-title">
+        <span v-if="swatch" class="row-swatch" :style="{ background: swatch }" aria-hidden="true" />
+        {{ title }}
+      </div>
       <div v-if="description" class="row-desc">{{ description }}</div>
     </div>
     <div class="row-control">
@@ -42,6 +47,16 @@ defineProps<{
 .row-title {
   font-size: var(--text-sm);
   color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* 线样式色块而不是圆点：对应的是图上的「线」，一小段粗线最像 */
+.row-swatch {
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 .row-desc {
   margin-top: 1px;

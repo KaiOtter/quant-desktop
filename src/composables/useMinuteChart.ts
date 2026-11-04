@@ -1,10 +1,36 @@
 import { ref, watch, onUnmounted, type Ref, type MaybeRef, unref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { registerIndicator } from 'klinecharts';
 import type { AxisCreateRangeParams, AxisCreateTicksParams, AxisRange, AxisTick, KLineData as KCLineData, DataLoader, YAxisOverride } from 'klinecharts';
-import type { MinuteData } from '@/types';
+import type { KLineData, MinuteData } from '@/types';
 import { beijingNow, mapMinuteBars, sessionKeyOf, sessionPrevClose, sessionUpdate } from '@/utils/minuteBars';
+import { computeMa, computeVwapSeries, MA_LINE_COLORS, VWAP_COLOR, type MinuteVwapResult } from '@/utils/minuteAux';
 import { inferBarMinutes, minuteAxisLayout, percentText, sessionFits, sessionTicks, symmetricRange } from '@/utils/minuteAxis';
+import { useSettingsStore } from '@/stores/settings';
 import { useChartCore } from './useChartCore';
+
+/** klinecharts 的指标注册表是全局的，同名重复注册会抛错，所以只注册一次 */
+let vwapIndicatorRegistered = false;
+
+/**
+ * 注册「分时均价」自定义指标：当日分钟数据的累计成交量加权价（VWAP）。
+ * 用指标而不是 overlay —— 数据增量推送（subscribeBar / 整挂）都会触发 calc 全量重算，
+ * 逐点更新是数据驱动的，不必在 5s 刷新里手动换点；悬浮时还会顺带显示均价读数。
+ */
+function ensureVwapIndicator() {
+  if (vwapIndicatorRegistered) return;
+  registerIndicator<MinuteVwapResult>({
+    name: 'MINUTE_VWAP',
+    shortName: '均价',
+    series: 'price',
+    calcParams: [],
+    shouldOhlc: false,
+    shouldFormatBigNumber: false,
+    figures: [{ key: 'vwap', title: '均价', type: 'line' }],
+    calc: (dataList) => computeVwapSeries(dataList).map((vwap) => ({ vwap })),
+  });
+  vwapIndicatorRegistered = true;
+}
 
 /**
  * 分时图 composable — 仅用于 MinuteChart 组件。
@@ -23,6 +49,7 @@ export function useMinuteChart(options: {
    */
   prevClose?: MaybeRef<number | undefined>;
 }) {
+  const settings = useSettingsStore();
   const { chart, loading, error, periodToKlinecharts, syncPrecision, initChartCore, disposeChart: coreDispose, reapplyStyles } = useChartCore(options);
 
   let abortController: AbortController | null = null;
@@ -224,6 +251,134 @@ export function useMinuteChart(options: {
     watch(() => unref(options.prevClose), () => applyPriceScale());
   }
 
+  // ---- 辅助线：当日分时均价线 + N 日线 ----
+  // 全部本地计算，不新增数据源接口：
+  // 均价线是当日分钟数据的累计成交量加权价（VWAP），走自定义指标（MINUTE_VWAP），
+  // 数据增量推送会触发 calc 全量重算，随行情自动逐点更新；
+  // N 日线是日 K 收盘价的简单移动平均，分时图上按业界惯例（同花顺/通达信）画成水平参考线，
+  // 取数复用 K 线图的 get_kline('daily')。
+
+  const MA_OVERLAY_PREFIX = 'minute_ma_';
+  /** N 日线周期 */
+  const MA_PERIODS = [5, 15, 30] as const;
+  /** 配色见 minuteAux 的 MA_LINE_COLORS：避开价格蓝 / 均价橙 / 基准灰的固定三色 */
+
+  /** 日 K 收盘价缓存（末位即当日未收完的 bar），5s 刷新只换末位的值即可重算均线 */
+  let dailyCloses: number[] = [];
+
+  /** 已装到图上的辅助线。removeOverlay/createOverlay 每次都触发 layout，记下来才能
+   *  避免 5s 刷新里的无谓重建 */
+  let vwapInstalled = false;
+  const maInstalled = new Set<number>();
+  /** 上次画 N 日线的签名（可见性 + 均值 + 配色 + 锚点），没变就跳过 */
+  let maSignature = '';
+
+  function maVisible(period: number): boolean {
+    if (period === 5) return settings.minuteMa5;
+    if (period === 15) return settings.minuteMa15;
+    return settings.minuteMa30;
+  }
+
+  /** 拉日 K 收盘价缓存（MA30 需要 30 根）。失败留空 —— 均线只是不画，不影响分时主图 */
+  async function fetchDailyCloses() {
+    try {
+      const data = await invoke<KLineData[]>('get_kline', {
+        code: unref(options.code),
+        market: unref(options.market),
+        period: 'daily',
+        count: 30,
+      });
+      dailyCloses = data.map((d) => d.close).filter((v) => Number.isFinite(v));
+    } catch (e) {
+      console.error('[useMinuteChart] fetch daily closes failed:', e);
+      dailyCloses = [];
+    }
+  }
+
+  function removeMaOverlays() {
+    const c = chart.value;
+    if (!c) return;
+    for (const p of maInstalled) {
+      c.removeOverlay({ id: `${MA_OVERLAY_PREFIX}${p}` });
+    }
+    maInstalled.clear();
+    maSignature = '';
+  }
+
+  function applyAuxLines() {
+    const c = chart.value;
+    if (!c) return;
+    const bars = klineData.value;
+
+    // 分时均价线：MINUTE_VWAP 指标随数据自更新，这里只按开关装/卸。
+    // 橙色固定写死：深浅主题都读得出（和昨收基准线写死中性灰是同一个思路）。
+    const wantVwap = settings.minuteAvgLine && bars.length > 0;
+    if (!wantVwap && vwapInstalled) {
+      c.removeIndicator({ paneId: CANDLE_PANE, name: 'MINUTE_VWAP' });
+      vwapInstalled = false;
+    } else if (wantVwap && !vwapInstalled) {
+      c.createIndicator({
+        name: 'MINUTE_VWAP',
+        paneId: CANDLE_PANE,
+        styles: { lines: [{ style: 'solid', color: VWAP_COLOR, size: 1 }] },
+      }, true);
+      vwapInstalled = true;
+    }
+
+    // N 日线：均值一天才动几次，按签名跳过重装
+    if (bars.length === 0) {
+      removeMaOverlays();
+      return;
+    }
+    const colors = MA_LINE_COLORS;
+    const maValues = MA_PERIODS.map((p) => computeMa(dailyCloses, p));
+    const lastTs = bars[bars.length - 1].timestamp;
+    const signature = MA_PERIODS.map((p, i) =>
+      `${maVisible(p) ? 1 : 0}:${maValues[i] ?? ''}:${colors[i]}`).join('|') + `|${lastTs}`;
+    if (signature === maSignature) return;
+    maSignature = signature;
+
+    MA_PERIODS.forEach((p, i) => {
+      const id = `${MA_OVERLAY_PREFIX}${p}`;
+      const value = maValues[i];
+      if (!maVisible(p) || value === null) {
+        if (maInstalled.has(p)) {
+          c.removeOverlay({ id });
+          maInstalled.delete(p);
+        }
+        return;
+      }
+      const points = [{ timestamp: lastTs, value }];
+      if (maInstalled.has(p)) {
+        c.overrideOverlay({ id, points });
+      } else {
+        c.createOverlay({
+          id,
+          name: 'horizontalStraightLine',
+          paneId: CANDLE_PANE,
+          points,
+          lock: true,
+          needDefaultPointFigure: false,
+          needDefaultXAxisFigure: false,
+          needDefaultYAxisFigure: false,
+          styles: { line: { style: 'solid', color: colors[i], size: 1 } },
+        });
+        maInstalled.add(p);
+      }
+    });
+  }
+
+  // 设置开关：即时装/卸；N 日线刚打开且缓存为空时先补拉日 K
+  watch(
+    () => [settings.minuteAvgLine, settings.minuteMa5, settings.minuteMa15, settings.minuteMa30],
+    async () => {
+      if ((settings.minuteMa5 || settings.minuteMa15 || settings.minuteMa30) && dailyCloses.length === 0) {
+        await fetchDailyCloses();
+      }
+      applyAuxLines();
+    },
+  );
+
   // ---- 自动刷新 ----
 
   function startAutoRefresh() {
@@ -258,6 +413,13 @@ export function useMinuteChart(options: {
         }
         applySessionAxis();
         applyPriceScale(reset);
+        // N 日线：日内只换日 K 末位的收盘价即可重算；跨交易日才重取日 K
+        if (reset) {
+          void fetchDailyCloses();
+        } else if (dailyCloses.length > 0 && newLast && typeof newLast.close === 'number') {
+          dailyCloses[dailyCloses.length - 1] = newLast.close;
+        }
+        applyAuxLines();
       } catch (e) {
         console.error('[useMinuteChart] incremental update failed:', e);
       }
@@ -305,6 +467,11 @@ export function useMinuteChart(options: {
         applySessionAxis();
         // 数据整份换过：昨收可能恰好相等，但基准线的时间戳得跟着新数据走
         applyPriceScale(true);
+        // 辅助线：N 日线开关开着才需要日 K 收盘价缓存
+        if (settings.minuteMa5 || settings.minuteMa15 || settings.minuteMa30) {
+          await fetchDailyCloses();
+        }
+        applyAuxLines();
       }
       startAutoRefresh();
     } catch (e) {
@@ -323,6 +490,7 @@ export function useMinuteChart(options: {
   function initChart() {
     initChartCore('minute');
     if (!chart.value) return;
+    ensureVwapIndicator();
     chart.value.overrideXAxis({ createTicks: minuteAxisTicks });
     // 横轴固定为一个交易日，拖拽与缩放都会把它带偏：拖完会被上面的重排拉回来，
     // 缩完柱宽就不再等于「图宽 / 格子数」。分时图本来也不给拖，索性关掉这两个手势。
@@ -341,6 +509,12 @@ export function useMinuteChart(options: {
       abortController.abort();
       abortController = null;
     }
+    // overlay 随图表实例一起销毁，但「已装」状态是模块级的，切标的重进时要归零，
+    // 否则新图表会被当成「线还在」而跳过首建
+    vwapInstalled = false;
+    maInstalled.clear();
+    maSignature = '';
+    dailyCloses = [];
     coreDispose();
   }
 

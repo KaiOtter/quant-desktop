@@ -13,9 +13,11 @@ import IndexSection from './IndexSection.vue';
 import MarketSection from './MarketSection.vue';
 import WatchlistSection from './WatchlistSection.vue';
 import TickerSection from './TickerSection.vue';
+import MinuteSection from './MinuteSection.vue';
 import GeneralSection from './GeneralSection.vue';
 import AboutSection from './AboutSection.vue';
 import {
+  Activity,
   ChartColumn,
   ChevronLeft,
   Info,
@@ -34,6 +36,7 @@ const sections = [
   { key: 'index', label: '指数区', component: IndexSection, icon: ChartColumn },
   { key: 'market', label: '市场概览', component: MarketSection, icon: LayoutDashboard },
   { key: 'watchlist', label: '自选列表', component: WatchlistSection, icon: Star },
+  { key: 'minute', label: '分时图', component: MinuteSection, icon: Activity },
   { key: 'ticker', label: '行情条', component: TickerSection, icon: RectangleEllipsis },
   { key: 'general', label: '通用', component: GeneralSection, icon: Settings },
   { key: 'about', label: '关于', component: AboutSection, icon: Info },
@@ -143,7 +146,7 @@ const activeSection = computed(
    任何窗口宽度下解出的左边距都相等（宽窗口平分、窄窗口回落 24px）。 */
 .section-tabs {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 2px;
   max-width: 1000px;
   margin: var(--space-3) max(var(--space-6), calc((100% - 1000px) / 2)) 0;

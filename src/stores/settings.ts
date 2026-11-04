@@ -112,6 +112,21 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 老板键；空串表示未设置（见 utils/prefs 的 parseAccelerator）。 */
   const bossKey = computed(() => parseAccelerator(settings.value['boss_key']));
 
+  // ── 分时图辅助线 ──
+  //
+  // 全部本地计算（分钟数据累计 VWAP / 日 K 收盘价 MA），开关只决定画不画。
+  // 均价线默认开 —— 它是分时图的标配参考（同花顺/通达信默认都有）；
+  // N 日线默认关 —— 对短线看分时的人是干扰，要的人自己去设置里开。
+
+  /** 当日分时均价线（VWAP） */
+  const minuteAvgLine = computed(() => parseBool(settings.value['minute_avg_line'], true));
+
+  const minuteMa5 = computed(() => parseBool(settings.value['minute_ma5'], false));
+
+  const minuteMa15 = computed(() => parseBool(settings.value['minute_ma15'], false));
+
+  const minuteMa30 = computed(() => parseBool(settings.value['minute_ma30'], false));
+
   async function fetchSettings() {
     try {
       settings.value = await invoke<Record<string, string>>('get_settings');
@@ -209,6 +224,22 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function setWatchlistDefaultSort(sort: DefaultSort | null) {
     await setSetting('watchlist_default_sort', sort ? JSON.stringify(sort) : '');
+  }
+
+  async function setMinuteAvgLine(v: boolean) {
+    await setSetting('minute_avg_line', v ? '1' : '0');
+  }
+
+  async function setMinuteMa5(v: boolean) {
+    await setSetting('minute_ma5', v ? '1' : '0');
+  }
+
+  async function setMinuteMa15(v: boolean) {
+    await setSetting('minute_ma15', v ? '1' : '0');
+  }
+
+  async function setMinuteMa30(v: boolean) {
+    await setSetting('minute_ma30', v ? '1' : '0');
   }
 
   async function setColorScheme(scheme: 'cn' | 'us') {
@@ -348,11 +379,13 @@ export const useSettingsStore = defineStore('settings', () => {
     indexCodes, marketOverviewVisible, sectorTopN, tickerVisible, tickerTransparent,
     tickerClickWakes,
     tickerItemsPerPage, watchlistColumns, watchlistDefaultSort, colorScheme, bossKey,
+    minuteAvgLine, minuteMa5, minuteMa15, minuteMa30,
     // 动作
     fetchSettings, setSetting, switchDatasource, setThemeMode, toggleAutoLaunch,
     applyColorScheme, applyRemoteSetting,
     setIndexCodes, setMarketOverviewVisible, setSectorTopN, setTickerVisible,
     setTickerTransparent, setTickerClickWakes, setTickerItemsPerPage, setWatchlistColumns,
     setWatchlistDefaultSort, setColorScheme, setBossKey,
+    setMinuteAvgLine, setMinuteMa5, setMinuteMa15, setMinuteMa30,
   };
 });

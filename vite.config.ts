@@ -18,9 +18,10 @@ export default defineConfig(async () => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
+  // 2. tauri expects a fixed port, fail if that port is not available.
+  //    3000 被 Qoder IDE 的预览服务长期占用，改用 3001（tauri.conf.json 的 devUrl 同步改）。
   server: {
-    port: 3000,
+    port: 3001,
     strictPort: true,
     host: host || "127.0.0.1",
     hmr: host
