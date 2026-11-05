@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useTickerWindowHeight } from '@/composables/useTickerWindowHeight';
 import { formatPrice } from '@/utils/format';
 import { nextPageStart, windowItems } from '@/utils/paging';
+import TickerRangeBar from './TickerRangeBar.vue';
 
 const quoteStore = useQuoteStore();
 const watchlist = useWatchlistStore();
@@ -161,6 +162,9 @@ function startCycle() {
 /**
  * 播报列表。顺序取自 store 的 `tickerItems`（按 `ticker_order` 排）——
  * 轮播顺序由设置页独立维护，与自选表的组内顺序无关。
+ *
+ * 区间条要用的 high/low/turnover/volume 都在实时行情快照里，随轮询
+ * 自然更新，不需要为区间条发任何额外请求。
  */
 const tickerItems = computed(() =>
   watchlist.tickerItems.map((item) => {
@@ -170,6 +174,11 @@ const tickerItems = computed(() =>
       code: item.code,
       price: q?.price ?? null,
       changePct: q?.change_pct ?? null,
+      prevClose: q ? q.price - q.change : null,
+      high: q?.high ?? null,
+      low: q?.low ?? null,
+      turnover: q?.turnover ?? null,
+      volume: q?.volume ?? null,
     };
   })
 );
@@ -357,6 +366,18 @@ async function handleClick(event: MouseEvent | KeyboardEvent) {
       <template v-else-if="visibleItems.length > 0">
         <div v-for="item in visibleItems" :key="item.code" class="ticker-row">
           <span class="ticker-name">{{ item.name }}</span>
+          <!-- 日内区间位置条：轨道=[最低,最高]，点=现价，竖线=昨收，菱形=分时均价。
+               高低任一缺失（行情未到）时整条不画，布局退回名称占满。 -->
+          <TickerRangeBar
+            v-if="item.price !== null && item.high !== null && item.high > 0 && item.low !== null && item.low > 0"
+            :price="item.price"
+            :prev-close="item.prevClose"
+            :low="item.low"
+            :high="item.high"
+            :turnover="item.turnover"
+            :volume="item.volume"
+            :up="item.changePct !== null ? item.changePct >= 0 : null"
+          />
           <span
             v-if="item.price !== null"
             class="ticker-price tabular-nums"
