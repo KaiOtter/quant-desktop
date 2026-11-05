@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { WatchItem, PeriodType, SubIndicatorType, MainOverlayType } from '@/types';
 import { useQuoteStore } from '@/stores/quote';
 import { useMinuteKUnavailable } from '@/composables/minutePeriod';
@@ -30,6 +30,13 @@ const activeMainOverlay = ref<MainOverlayType>('MA');
 
 // 新浪数据源不支持 1 分钟：若正在查看 1 分钟时切到新浪，自动回落到 5 分钟。
 useMinuteKUnavailable(activePeriod);
+
+// 详情面板展开期间（本组件 v-if 挂载），Esc 关闭面板，与右上角叉叉等效。
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') emit('close');
+}
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 </script>
 
 <template>
