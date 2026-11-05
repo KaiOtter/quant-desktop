@@ -18,6 +18,28 @@ const env = { ...process.env };
 // ----- Auto-detect local proxy -----
 const PROXY_PORTS = [7890, 10809, 1080, 8118, 8080, 1087, 4780];
 
+// Send a real CONNECT handshake to verify the port is actually a working
+// HTTP proxy (a merely-open port, e.g. a local dev server, returns 400).
+function proxyWorks(port) {
+  return new Promise((resolve) => {
+    const s = connect({ host: '127.0.0.1', port, timeout: 1000 }, () => {
+      s.write('CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n');
+      let buf = '';
+      s.on('data', (d) => {
+        buf += d.toString();
+        if (buf.includes('\r\n\r\n') || buf.length > 64) {
+          s.destroy();
+          resolve(buf.startsWith('HTTP/1.1 200') || buf.startsWith('HTTP/1.0 200'));
+        }
+      });
+      s.on('error', () => resolve(false));
+      s.on('timeout', () => { s.destroy(); resolve(false); });
+    });
+    s.on('error', () => resolve(false));
+    s.on('timeout', () => { s.destroy(); resolve(false); });
+  });
+}
+
 async function detectProxy() {
   // respect explicit user setting first
   if (env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy) {
@@ -33,15 +55,15 @@ async function detectProxy() {
       s.on('error', () => resolve(false));
       s.on('timeout', () => { s.destroy(); resolve(false); });
     });
-    if (reachable) {
+    if (reachable && (await proxyWorks(port))) {
       const proxy = `http://127.0.0.1:${port}`;
       env.HTTPS_PROXY = proxy;
       env.HTTP_PROXY = proxy;
-      console.log(`[build] Proxy detected: ${proxy}`);
+      console.log(`[build] Proxy detected and verified: ${proxy}`);
       return;
     }
   }
-  console.log('[build] No proxy detected, direct connection');
+  console.log('[build] No working proxy detected, direct connection');
 }
 
 // ----- Build -----
