@@ -195,11 +195,22 @@ pub fn set_ticker_visible(
     apply_tool_window_style(&window);
 
     // 位置:优先恢复上次保存的坐标，越界或首次则回到右下角默认位。
+    // 必须用工作区(work_area()，排除任务栏)而不是整块屏幕:整屏的话默认位
+    // 会贴进任务栏底下、拖动也能把窗口滑到任务栏后面 —— 窗口其实活着,只是
+    // 被任务栏盖住,用户看到的就是「行情条不见了」。
     let mon = window.primary_monitor().ok().flatten();
-    let (mon_w, mon_h) = mon
+    let (ax, ay, aw, ah) = mon
         .as_ref()
-        .map(|m| { let s = m.size(); (s.width as i32, s.height as i32) })
-        .unwrap_or((1920, 1080));
+        .map(|m| {
+            let r = m.work_area();
+            (
+                r.position.x,
+                r.position.y,
+                r.position.x + r.size.width as i32,
+                r.position.y + r.size.height as i32,
+            )
+        })
+        .unwrap_or((0, 0, 1920, 1080));
     let win_size = window.outer_size().unwrap_or_else(|_| {
         // TICKER_* 是逻辑像素，折算物理像素需乘窗口缩放系数，
         // 否则 DPI ≠ 100% 时兜底几何偏小
@@ -216,16 +227,21 @@ pub fn set_ticker_visible(
     if let Ok(Some(x)) = db.get_setting(keys::TICKER_X) {
         if let Ok(Some(y)) = db.get_setting(keys::TICKER_Y) {
             if let (Ok(sx), Ok(sy)) = (x.parse::<i32>(), y.parse::<i32>()) {
-                if sx + tw > 0 && sy + th > 0 && sx < mon_w && sy < mon_h {
-                    let _ = window.set_position(tauri::PhysicalPosition::new(sx, sy));
+                // 只要求保存的矩形与工作区有交集;落在工作区外的那一侧钳回
+                // 边界(如贴着任务栏底边的旧坐标抬到任务栏上方),完全不相交
+                // 才回到默认位。
+                if sx + tw > ax && sy + th > ay && sx < aw && sy < ah {
+                    let cx = sx.clamp(ax, (aw - tw).max(ax));
+                    let cy = sy.clamp(ay, (ah - th).max(ay));
+                    let _ = window.set_position(tauri::PhysicalPosition::new(cx, cy));
                     restored = true;
                 }
             }
         }
     }
     if !restored {
-        let x = mon_w.saturating_sub(tw + 10);
-        let y = mon_h.saturating_sub(th + 60);
+        let x = aw.saturating_sub(tw + 10);
+        let y = ah.saturating_sub(th + 10);
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
 
@@ -709,12 +725,23 @@ pub fn run() {
             if let Some(ticker) = app.get_webview_window("ticker") {
                 let _ = ticker.set_always_on_top(true);
 
-                // Capture monitor bounds and ticker size for clamping on move
+                // Capture the work area (screen minus taskbar) and ticker size
+                // for clamping on move. Using the full screen lets the ticker
+                // slide behind the taskbar where it's invisible — the window
+                // is alive but looks "gone".
                 let mon = ticker.primary_monitor().ok().flatten();
-                let (mon_w, mon_h) = mon
+                let (ax, ay, aw, ah) = mon
                     .as_ref()
-                    .map(|m| { let s = m.size(); (s.width as i32, s.height as i32) })
-                    .unwrap_or((1920, 1080));
+                    .map(|m| {
+                        let r = m.work_area();
+                        (
+                            r.position.x,
+                            r.position.y,
+                            r.position.x + r.size.width as i32,
+                            r.position.y + r.size.height as i32,
+                        )
+                    })
+                    .unwrap_or((0, 0, 1920, 1080));
                 let ticker_size = ticker.outer_size().unwrap_or_else(|_| {
                     // TICKER_* 是逻辑像素，折算物理像素需乘窗口缩放系数，
                     // 否则 DPI ≠ 100% 时兜底几何偏小
@@ -734,12 +761,12 @@ pub fn run() {
                 let db_clone = db.clone();
                 let _ = ticker.on_window_event(move |event| {
                     if let tauri::WindowEvent::Moved(pos) = event {
-                        // How much of the ticker is inside the monitor bounds?
-                        let visible_left = pos.x.max(0);
-                        let visible_right = (pos.x + tw).min(mon_w);
+                        // How much of the ticker is inside the work area?
+                        let visible_left = pos.x.max(ax);
+                        let visible_right = (pos.x + tw).min(aw);
                         let visible_w = (visible_right - visible_left).max(0);
-                        let visible_top = pos.y.max(0);
-                        let visible_bottom = (pos.y + th).min(mon_h);
+                        let visible_top = pos.y.max(ay);
+                        let visible_bottom = (pos.y + th).min(ah);
                         let visible_h = (visible_bottom - visible_top).max(0);
 
                         // Require at least 50×20 px visible — otherwise it's
@@ -748,8 +775,8 @@ pub fn run() {
                             return;
                         }
 
-                        let clamped_x = pos.x.max(0).min(mon_w - tw);
-                        let clamped_y = pos.y.max(0).min(mon_h - th);
+                        let clamped_x = pos.x.max(ax).min(aw - tw);
+                        let clamped_y = pos.y.max(ay).min(ah - th);
                         if let Err(e) = db_clone.set_setting(keys::TICKER_X, &clamped_x.to_string()) {
                             log::warn!("Failed to save ticker_x: {}", e);
                         }
@@ -772,15 +799,17 @@ pub fn run() {
                     }
                 }
                 if has_pos
-                    && saved_x + tw > 0
-                    && saved_y + th > 0
-                    && saved_x < mon_w
-                    && saved_y < mon_h
+                    && saved_x + tw > ax
+                    && saved_y + th > ay
+                    && saved_x < aw
+                    && saved_y < ah
                 {
-                    let _ = ticker.set_position(tauri::PhysicalPosition::new(saved_x, saved_y));
+                    let cx = saved_x.clamp(ax, (aw - tw).max(ax));
+                    let cy = saved_y.clamp(ay, (ah - th).max(ay));
+                    let _ = ticker.set_position(tauri::PhysicalPosition::new(cx, cy));
                 } else {
-                    let x = (mon_w).saturating_sub(tw + 10);
-                    let y = (mon_h).saturating_sub(th + 60);
+                    let x = aw.saturating_sub(tw + 10);
+                    let y = ah.saturating_sub(th + 10);
                     let _ = ticker.set_position(tauri::PhysicalPosition::new(x, y));
                 }
 
@@ -887,7 +916,9 @@ fn detect_and_set_proxy() {
     let ports = [7890u16, 10809, 10808, 7891, 1080, 8118, 8080];
     for &port in &ports {
         let addr = format!("127.0.0.1:{}", port);
-        if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(1)).is_ok() {
+        if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(1)).is_ok()
+            && proxy_accepts_connect(&addr)
+        {
             let proxy = format!("http://{}", addr);
             std::env::set_var("HTTPS_PROXY", &proxy);
             std::env::set_var("HTTP_PROXY", &proxy);
@@ -901,6 +932,38 @@ fn detect_and_set_proxy() {
         }
     }
     log::info!("[proxy] No local proxy detected");
+}
+
+/// 端口能连上不等于它是代理 —— 本机 8080 常住着各种开发服务,CONNECT 过去
+/// 只会吃到 400,随后所有走 reqwest 的请求(更新检查等)全部失败。只对
+/// CONNECT 握手回 `200` 的地址启用代理。判据与 scripts/build.mjs 的
+/// proxyWorks() 一致,两处要一起改。
+fn proxy_accepts_connect(addr: &str) -> bool {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+    let mut stream = match TcpStream::connect_timeout(
+        &addr.parse().unwrap(),
+        Duration::from_secs(1),
+    ) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    if stream
+        .write_all(b"CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    match stream.read(&mut buf) {
+        Ok(n) if n >= 12 => {
+            let head = String::from_utf8_lossy(&buf[..n]);
+            head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
