@@ -278,7 +278,7 @@ quant-desktop/
 | 窗口 | 标签 | 入口 | 配置 |
 |------|------|------|------|
 | 主界面 | `main` | `index.html` → `src/main.ts` | 1100×680，启动隐藏，关闭最小化至托盘，位置/大小持久化 |
-| 行情条 | `ticker` | `ticker.html` → `src/ticker.ts` | 宽 280、高度自适应内容，无边框置顶，初始定位桌面右下角，可拖拽且位置持久化（`ticker_x`/`ticker_y`），隐藏任务栏图标 |
+| 行情条 | `ticker` | `ticker.html` → `src/ticker.ts` | 宽 255、高度自适应内容，无边框置顶，初始定位桌面右下角，可拖拽且位置持久化（`ticker_x`/`ticker_y`），隐藏任务栏图标 |
 
 ## 数据源
 
