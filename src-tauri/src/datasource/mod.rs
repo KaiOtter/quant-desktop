@@ -102,7 +102,7 @@ pub const DEFAULT_INDEX_CODES: &[&str] = &[
 /// Consumers needing *physical* pixels (the `outer_size()` fallbacks in
 /// `lib.rs`) must multiply by the window's `scale_factor()` — the raw value
 /// undersizes the window at DPI ≠ 100%.
-pub const TICKER_WIDTH: u32 = 230;
+pub const TICKER_WIDTH: u32 = 280;
 pub const TICKER_HEIGHT: u32 = 40;
 
 // ── Data Normalization ──

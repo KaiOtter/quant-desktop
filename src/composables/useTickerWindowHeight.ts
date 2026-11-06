@@ -1,6 +1,6 @@
 // useTickerWindowHeight.ts — 让行情条窗口高度跟着内容走，适配系统缩放。
 //
-// 背景：行情条窗口尺寸写在 tauri.conf.json 里（230×40 逻辑像素，只能取一个
+// 背景：行情条窗口尺寸写在 tauri.conf.json 里（280×40 逻辑像素，只能取一个
 // 固定值）。逻辑像素不随 DPI 变化，但内容的 CSS 像素高度在变：两行文本
 // line-height:1.4 + 上下 padding 本身就有 ~38.8px，再叠上不同缩放下的子像素
 // 取整，固定的那个数字总会在某些缩放下把内容裁掉一截 —— 100% 和 125% 裁掉的
@@ -33,7 +33,7 @@ const EPSILON = 0.5;
  * 代价：这个值改了 tauri.conf.json（和 Rust 常量）就必须同步改这里，没有
  * 编译期约束。
  */
-const WIDTH = 230;
+const WIDTH = 280;
 
 /** 缩放变化后的重试节奏：间隔毫秒数 × 次数（见 scheduleRetries 注释）。 */
 const RETRY_INTERVAL_MS = 150;

@@ -157,7 +157,7 @@ describe('useTickerWindowHeight', () => {
     flushRaf();
     await flushAsync();
     expect(mocks.api.setSize).toHaveBeenCalledTimes(1);
-    expect(mocks.api.setSize.mock.calls[0][0]).toMatchObject({ width: 230, height: 24 });
+    expect(mocks.api.setSize.mock.calls[0][0]).toMatchObject({ width: 280, height: 24 });
   });
 
   it('高度变化后按物理高度差回移 y，下边缘始终钉在原地', async () => {
@@ -170,7 +170,7 @@ describe('useTickerWindowHeight', () => {
 
     // 初始内容 24 逻辑（=30 物理）：高度 50→30，y 下移 20 补偿，下边缘不动
     expect(mocks.api.setSize).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 230, height: 24 })
+      expect.objectContaining({ width: 280, height: 24 })
     );
     expect(mocks.state.y + mocks.state.height).toBe(BOTTOM_EDGE);
 
@@ -181,7 +181,7 @@ describe('useTickerWindowHeight', () => {
     await flushAsync();
 
     expect(mocks.api.setSize).toHaveBeenLastCalledWith(
-      expect.objectContaining({ width: 230, height: 39 })
+      expect.objectContaining({ width: 280, height: 39 })
     );
     expect(mocks.api.setPosition).toHaveBeenLastCalledWith(
       expect.objectContaining({ x: 1690, y: 1031 })
